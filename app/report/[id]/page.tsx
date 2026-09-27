@@ -1,13 +1,17 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/useAuth';
 import { InterviewDoc } from '@/types/interview';
 
-export default function Report({ params }: { params: { id: string } }) {
-  const { id } = params;
+export default function Report({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = use(params);
   const { user, loading } = useAuth();
   const router = useRouter();
   const [interview, setInterview] = useState<InterviewDoc | null>(null);
