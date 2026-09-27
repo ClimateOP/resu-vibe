@@ -7,7 +7,7 @@ async function callGemini(
   userPrompt: string,
 ): Promise<string> {
   const key = process.env.GEMINI_API_KEY;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${key}`;
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -24,19 +24,19 @@ async function callGemini(
   return text;
 }
 
-async function callGrok(
+async function callGroq(
   systemPrompt: string,
   userPrompt: string,
 ): Promise<string> {
-  const key = process.env.GROK_API_KEY;
-  const res = await fetch('https://api.x.ai/v1/chat/completions', {
+  const key = process.env.GROQ_API_KEY;
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${key}`,
     },
     body: JSON.stringify({
-      model: 'grok-2-latest',
+      model: 'openai/gpt-oss-120b',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
@@ -47,7 +47,7 @@ async function callGrok(
   const data = await res.json();
   const text = data?.choices?.[0]?.message?.content;
   if (!text)
-    throw new Error('Grok returned no content: ' + JSON.stringify(data));
+    throw new Error('Groq returned no content: ' + JSON.stringify(data));
   return text;
 }
 
@@ -56,8 +56,8 @@ async function callLLM<T>(
   userPrompt: string,
 ): Promise<T> {
   const raw =
-    PROVIDER === 'grok'
-      ? await callGrok(systemPrompt, userPrompt)
+    PROVIDER === 'groq'
+      ? await callGroq(systemPrompt, userPrompt)
       : await callGemini(systemPrompt, userPrompt);
   const cleaned = raw.replace(/```json|```/g, '').trim();
   return JSON.parse(cleaned) as T;
