@@ -1,10 +1,14 @@
 'use client';
 import { useEffect, useState, use } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/useAuth';
 import { InterviewDoc } from '@/types/interview';
+import { delay } from '@/lib/anim';
+import GlowCard from '@/components/GlowCard';
+import Transcript from '@/components/Transcript';
 
 export default function Report({
   params,
@@ -28,91 +32,121 @@ export default function Report({
     })();
   }, [user, id]);
 
-  if (loading || !user || !interview)
-    return <div className="mx-auto max-w-xl px-6 py-16">Loading…</div>;
+  if (loading || !user || !interview) {
+    return <div className="page loading-shell">Loading…</div>;
+  }
 
   const { finalReport, qaLog } = interview;
 
   return (
-    <div className="mx-auto max-w-xl px-6 py-16">
-      <div className="mb-8 flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Your report</h1>
-        <a
-          href="/dashboard"
-          className="text-sm text-zinc-500 hover:text-zinc-900"
-        >
-          Back to dashboard
-        </a>
-      </div>
-
-      {!finalReport && (
-        <p className="text-sm text-zinc-500">Report not ready yet.</p>
-      )}
-
-      {finalReport && (
-        <>
-          <div className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
-            <div className="text-4xl font-semibold">
-              {finalReport.overallScore}
-              <span className="text-base font-normal text-zinc-400">/100</span>
-            </div>
-            <p className="mt-2 text-sm text-zinc-700">{finalReport.summary}</p>
-
-            <div className="my-5 grid grid-cols-2 gap-3">
-              {Object.entries(finalReport.categoryScores || {}).map(
-                ([key, val]) => (
-                  <div key={key} className="rounded-md bg-indigo-50 p-3">
-                    <div className="text-xl font-semibold">{val}</div>
-                    <div className="text-xs text-zinc-500">
-                      {formatLabel(key)}
-                    </div>
-                  </div>
-                ),
-              )}
-            </div>
-
-            <h3 className="mb-1 mt-4 font-medium">Strengths</h3>
-            <ul className="divide-y divide-zinc-200 text-sm text-zinc-700">
-              {finalReport.strengths?.map((s, i) => (
-                <li key={i} className="py-1.5">
-                  {s}
-                </li>
-              ))}
-            </ul>
-
-            <h3 className="mb-1 mt-4 font-medium">What to improve</h3>
-            <ul className="divide-y divide-zinc-200 text-sm text-zinc-700">
-              {finalReport.improvements?.map((s, i) => (
-                <li key={i} className="py-1.5">
-                  {s}
-                </li>
-              ))}
-            </ul>
+    <div className="page">
+      <div className="wrap">
+        <div className="top-row rise" style={delay(0)}>
+          <div>
+            <span className="section-label">Debrief</span>
+            <h1 className="section-title small">Your report</h1>
           </div>
+          <Link href="/dashboard" className="link-btn">
+            ← Back to dashboard
+          </Link>
+        </div>
 
-          <h2 className="mb-4 mt-10 text-lg font-semibold">Full transcript</h2>
-          {qaLog.map((qa, i) => (
-            <div key={i} className="mb-6 border-l-2 border-zinc-200 pl-4">
-              <div className="mb-1 font-medium">
-                Q{i + 1}. {qa.question}
+        {!finalReport && <p className="muted">Report not ready yet.</p>}
+
+        {finalReport && (
+          <>
+            <GlowCard
+              tilt={false}
+              className="glass-strong report-card rise"
+              style={delay(1)}
+            >
+              <div className="score-hero">
+                <svg
+                  width="120"
+                  height="120"
+                  viewBox="0 0 120 120"
+                  className="score-ring"
+                >
+                  <circle cx="60" cy="60" r="52" className="ring-bg" />
+                  <circle
+                    cx="60"
+                    cy="60"
+                    r="52"
+                    className="ring-fg"
+                    style={{
+                      strokeDasharray: 2 * Math.PI * 52,
+                      strokeDashoffset:
+                        2 * Math.PI * 52 * (1 - finalReport.overallScore / 100),
+                    }}
+                  />
+                </svg>
+                <div className="score-num">
+                  <span>{finalReport.overallScore}</span>
+                  <small>/100</small>
+                </div>
+                <p className="score-summary">{finalReport.summary}</p>
               </div>
-              <div className="mb-1 whitespace-pre-wrap text-zinc-700">
-                {qa.answer}
+
+              <div className="score-grid">
+                {Object.entries(finalReport.categoryScores || {}).map(
+                  ([key, val]) => (
+                    <div className="score-cell" key={key}>
+                      <div className="bar-track">
+                        <div
+                          className="bar-fill"
+                          style={{ width: `${val}%` }}
+                        />
+                      </div>
+                      <div className="score-cell-row">
+                        <span className="label">{formatLabel(key)}</span>
+                        <span className="num-sm">{val}</span>
+                      </div>
+                    </div>
+                  ),
+                )}
               </div>
-              {qa.feedback && (
-                <div className="text-sm text-indigo-600">{qa.feedback}</div>
-              )}
+
+              <div className="two-col">
+                <div>
+                  <h3 className="mini-title good">Strengths</h3>
+                  <ul className="check-list good">
+                    {finalReport.strengths?.map((s, i) => (
+                      <li key={i}>{s}</li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <h3 className="mini-title warn">What to improve</h3>
+                  <ul className="check-list warn">
+                    {finalReport.improvements?.map((s, i) => (
+                      <li key={i}>{s}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </GlowCard>
+
+            <div className="rise" style={{ ...delay(2), marginTop: '3rem' }}>
+              <span className="section-label">Transcript</span>
+              <h2 className="section-title small">Full conversation</h2>
             </div>
-          ))}
 
-          <a
-            href="/"
-            className="inline-block rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white"
-          >
-            Try another attempt
-          </a>
-        </>
-      )}
+            <GlowCard
+              tilt={false}
+              className="glass-strong chat-panel rise"
+              style={{ ...delay(3), marginTop: '1.5rem' }}
+            >
+              <Transcript items={qaLog} />
+            </GlowCard>
+
+            <div className="center-row rise" style={delay(4)}>
+              <Link href="/" className="btn btn-primary">
+                Try another attempt <span aria-hidden>→</span>
+              </Link>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

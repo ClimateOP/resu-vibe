@@ -1,71 +1,95 @@
 'use client';
 import { useState, FormEvent } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { FirebaseError } from 'firebase/app';
 import { auth } from '@/lib/firebase';
+import { delay } from '@/lib/anim';
+import GlowCard from '@/components/GlowCard';
 
 export default function Signup() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
   const router = useRouter();
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError('');
+    setBusy(true);
     try {
       await createUserWithEmailAndPassword(auth, email, password);
       router.push('/dashboard');
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      const code = err instanceof FirebaseError ? err.code : '';
+      setError(
+        code === 'auth/email-already-in-use'
+          ? 'That email is already registered.'
+          : code === 'auth/weak-password'
+            ? 'Password should be at least 6 characters.'
+            : err instanceof Error
+              ? err.message
+              : 'Something went wrong.',
+      );
+      setBusy(false);
     }
   }
 
   return (
-    <div className="mx-auto max-w-sm px-6 py-16">
-      <h1 className="mb-1 text-xl font-semibold">Create your account</h1>
-      <p className="mb-6 text-sm text-zinc-600">
-        Practice the resume round before the real one.
-      </p>
-      <form
-        onSubmit={handleSubmit}
-        className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm"
-      >
-        <div className="mb-4">
-          <label className="mb-1 block text-sm text-zinc-600">Email</label>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-          />
+    <div className="page center">
+      <div className="wrap wrap-auth">
+        <div className="rise" style={delay(0)}>
+          <span className="section-label">Get started</span>
+          <h1 className="section-title">Create your account</h1>
+          <p className="section-sub">
+            Practice the resume round before the real one.
+          </p>
         </div>
-        <div className="mb-4">
-          <label className="mb-1 block text-sm text-zinc-600">Password</label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            minLength={6}
-            className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-          />
+
+        <div className="rise" style={{ ...delay(1), marginTop: '2rem' }}>
+          <GlowCard tilt={false} className="glass-strong">
+            <form onSubmit={handleSubmit}>
+              <div className="field">
+                <label>Email</label>
+                <input
+                  className="input"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  required
+                />
+              </div>
+              <div className="field">
+                <label>Password</label>
+                <input
+                  className="input"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="At least 6 characters"
+                  required
+                  minLength={6}
+                />
+              </div>
+              {error && <p className="err">{error}</p>}
+              <button
+                className="btn btn-primary w-full"
+                type="submit"
+                disabled={busy}
+              >
+                {busy ? 'Creating account…' : 'Sign up'}
+              </button>
+            </form>
+          </GlowCard>
         </div>
-        {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
-        <button
-          type="submit"
-          className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white"
-        >
-          Sign up
-        </button>
-      </form>
-      <p className="mt-4 text-sm text-zinc-600">
-        Already have an account?{' '}
-        <a href="/login" className="text-indigo-600">
-          Log in
-        </a>
-      </p>
+
+        <p className="switch rise" style={delay(2)}>
+          Already have an account? <Link href="/login">Log in</Link>
+        </p>
+      </div>
     </div>
   );
 }

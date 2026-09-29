@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   collection,
@@ -8,16 +9,18 @@ import {
   orderBy,
   onSnapshot,
 } from 'firebase/firestore';
-import { signOut } from 'firebase/auth';
-import { db, auth } from '@/lib/firebase';
+import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/useAuth';
 import { InterviewDoc } from '@/types/interview';
+import { delay } from '@/lib/anim';
+import GlowCard from '@/components/GlowCard';
 
 type InterviewRow = InterviewDoc & { id: string };
 
 export default function Dashboard() {
   const { user, loading } = useAuth();
-  const [interviews, setInterviews] = useState<InterviewRow[]>([]);
+  const [interviews, setInterviews] = useState<InterviewRow[] | null>(null);
+  const [indexError, setIndexError] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -31,69 +34,83 @@ export default function Dashboard() {
       where('uid', '==', user.uid),
       orderBy('createdAt', 'desc'),
     );
-    const unsub = onSnapshot(q, (snap) => {
-      setInterviews(
-        snap.docs.map((d) => ({ id: d.id, ...(d.data() as InterviewDoc) })),
-      );
-    });
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        setInterviews(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as InterviewDoc) })),
+        );
+      },
+      (err) => {
+        if (err.code === 'failed-precondition') setIndexError(true);
+      },
+    );
     return unsub;
   }, [user]);
 
-  if (loading || !user)
-    return <div className="mx-auto max-w-xl px-6 py-16">Loading…</div>;
+  if (loading || !user) {
+    return <div className="page loading-shell">Loading…</div>;
+  }
 
   return (
-    <div className="mx-auto max-w-xl px-6 py-16">
-      <div className="mb-8 flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Your interviews</h1>
-        <div className="flex items-center gap-3">
-          <a
-            href="/"
-            className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white"
-          >
-            New attempt
-          </a>
-          <button
-            onClick={() => signOut(auth)}
-            className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm"
-          >
-            Log out
-          </button>
+    <div className="page">
+      <div className="wrap">
+        <div className="top-row rise" style={delay(0)}>
+          <div>
+            <span className="section-label">Your history</span>
+            <h1 className="section-title">Past attempts</h1>
+          </div>
+          <Link href="/" className="btn btn-primary">
+            New attempt <span aria-hidden>→</span>
+          </Link>
+        </div>
+
+        {indexError && (
+          <p className="err rise" style={delay(1)}>
+            Firestore needs a composite index for this query — open the link
+            from the browser console error once to auto-create it, then refresh.
+          </p>
+        )}
+
+        {interviews && interviews.length === 0 && (
+          <p className="muted rise" style={delay(1)}>
+            No interviews yet. Start your first one above.
+          </p>
+        )}
+
+        <div className="list rise" style={delay(1)}>
+          {interviews?.map((iv, i) => (
+            <GlowCard tilt={false} className="row" key={iv.id} style={delay(i)}>
+              <div className="row-main">
+                <span className={`badge ${iv.status}`}>
+                  {iv.status === 'completed' ? 'Completed' : 'In progress'}
+                </span>
+                <span className="row-date">
+                  {iv.createdAt
+                    ? iv.createdAt.toDate().toLocaleString()
+                    : 'just now'}
+                </span>
+                {iv.finalReport && (
+                  <span className="row-score">
+                    {iv.finalReport.overallScore}/100
+                  </span>
+                )}
+              </div>
+              <Link
+                href={
+                  iv.status === 'completed'
+                    ? `/report/${iv.id}`
+                    : `/interview/${iv.id}`
+                }
+                className="row-link"
+              >
+                {iv.status === 'completed' ? 'View report' : 'Continue'}{' '}
+                <span aria-hidden>→</span>
+              </Link>
+            </GlowCard>
+          ))}
         </div>
       </div>
-
-      {interviews.length === 0 && (
-        <p className="text-sm text-zinc-500">
-          No interviews yet. Start your first one.
-        </p>
-      )}
-
-      <ul className="divide-y divide-zinc-200 rounded-lg border border-zinc-200 bg-white">
-        {interviews.map((iv) => (
-          <li
-            key={iv.id}
-            className="flex items-center justify-between px-4 py-3 text-sm"
-          >
-            <span className="text-zinc-600">
-              {iv.status === 'completed' ? 'Completed' : 'In progress'} ·{' '}
-              {(iv.createdAt as any)?.toDate
-                ? (iv.createdAt as any).toDate().toLocaleString()
-                : 'just now'}
-              {iv.finalReport && ` · Score: ${iv.finalReport.overallScore}`}
-            </span>
-            <a
-              href={
-                iv.status === 'completed'
-                  ? `/report/${iv.id}`
-                  : `/interview/${iv.id}`
-              }
-              className="text-indigo-600"
-            >
-              {iv.status === 'completed' ? 'View report' : 'Continue'}
-            </a>
-          </li>
-        ))}
-      </ul>
     </div>
   );
 }

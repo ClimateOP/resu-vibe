@@ -1,3 +1,7 @@
+import type { Timestamp } from 'firebase/firestore';
+
+export type Provider = 'gemini' | 'groq';
+
 export interface QAItem {
   question: string;
   answer: string;
@@ -30,6 +34,6 @@ export interface InterviewDoc {
   resumeText: string;
   qaLog: QAItem[];
   status: 'in-progress' | 'completed';
-  createdAt: any; // Firestore Timestamp
+  createdAt: Timestamp | null;
   finalReport?: FinalReport;
 }

@@ -4,7 +4,10 @@ import { useRouter } from 'next/navigation';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/useAuth';
+import { useProvider } from '@/lib/useProvider';
 import { InterviewDoc, QAItem, InterviewStep } from '@/types/interview';
+import Transcript from '@/components/Transcript';
+import GlowCard from '@/components/GlowCard';
 
 export default function Interview({
   params,
@@ -13,6 +16,7 @@ export default function Interview({
 }) {
   const { id } = use(params);
   const { user, loading } = useAuth();
+  const { provider } = useProvider();
   const router = useRouter();
 
   const [resumeText, setResumeText] = useState('');
@@ -21,7 +25,9 @@ export default function Interview({
   const [answer, setAnswer] = useState('');
   const [busy, setBusy] = useState(true);
   const [finishing, setFinishing] = useState(false);
+  const [error, setError] = useState('');
   const started = useRef(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!loading && !user) router.push('/login');
@@ -45,45 +51,62 @@ export default function Interview({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [qaLog, currentQuestion, busy]);
+
   async function fetchNextQuestion(resume: string, log: QAItem[]) {
     setBusy(true);
-    const res = await fetch('/api/interview', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ resumeText: resume, qaLog: log }),
-    });
-    const step: InterviewStep = await res.json();
+    setError('');
+    try {
+      const res = await fetch('/api/interview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resumeText: resume, qaLog: log, provider }),
+      });
+      const step: InterviewStep & { error?: string } = await res.json();
+      if (step.error) throw new Error(step.error);
 
-    if (log.length > 0 && step.feedback) {
-      const updatedLog = [...log];
-      updatedLog[updatedLog.length - 1].feedback = step.feedback;
-      setQaLog(updatedLog);
-      await updateDoc(doc(db, 'interviews', id), { qaLog: updatedLog });
-      log = updatedLog;
+      if (log.length > 0 && step.feedback) {
+        const updatedLog = [...log];
+        updatedLog[updatedLog.length - 1].feedback = step.feedback;
+        setQaLog(updatedLog);
+        await updateDoc(doc(db, 'interviews', id), { qaLog: updatedLog });
+        log = updatedLog;
+      }
+
+      if (step.done) {
+        await finishInterview(resume, log);
+        return;
+      }
+
+      setCurrentQuestion(step.question);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong.');
+    } finally {
+      setBusy(false);
     }
-
-    if (step.done) {
-      await finishInterview(resume, log);
-      return;
-    }
-
-    setCurrentQuestion(step.question);
-    setBusy(false);
   }
 
   async function finishInterview(resume: string, log: QAItem[]) {
     setFinishing(true);
-    const res = await fetch('/api/report', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ resumeText: resume, qaLog: log }),
-    });
-    const report = await res.json();
-    await updateDoc(doc(db, 'interviews', id), {
-      status: 'completed',
-      finalReport: report,
-    });
-    router.push(`/report/${id}`);
+    try {
+      const res = await fetch('/api/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resumeText: resume, qaLog: log, provider }),
+      });
+      const report = await res.json();
+      if (report.error) throw new Error(report.error);
+      await updateDoc(doc(db, 'interviews', id), {
+        status: 'completed',
+        finalReport: report,
+      });
+      router.push(`/report/${id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong.');
+      setFinishing(false);
+    }
   }
 
   async function handleAnswer(e: FormEvent) {
@@ -100,69 +123,96 @@ export default function Interview({
     await fetchNextQuestion(resumeText, newLog);
   }
 
+  function retry() {
+    if (currentQuestion || finishing) {
+      fetchNextQuestion(resumeText, qaLog);
+    }
+  }
+
   if (loading || !user)
-    return <div className="mx-auto max-w-xl px-6 py-16">Loading…</div>;
+    return <div className="page loading-shell">Loading…</div>;
 
   return (
-    <div className="mx-auto max-w-xl px-6 py-16">
-      <div className="mb-8 flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Interview in progress</h1>
-        <a
-          href="/dashboard"
-          className="text-sm text-zinc-500 hover:text-zinc-900"
-        >
-          Save & exit
-        </a>
-      </div>
-
-      {qaLog.map((qa, i) => (
-        <div key={i} className="mb-6 border-l-2 border-zinc-200 pl-4">
-          <div className="mb-1 font-medium">
-            Q{i + 1}. {qa.question}
+    <div className="page">
+      <div className="wrap wrap-chat">
+        <div className="top-row">
+          <div>
+            <span className="section-label">In progress</span>
+            <h1 className="section-title small">Resume round</h1>
           </div>
-          <div className="mb-1 whitespace-pre-wrap text-zinc-700">
-            {qa.answer}
-          </div>
-          {qa.feedback && (
-            <div className="text-sm text-indigo-600">{qa.feedback}</div>
-          )}
-        </div>
-      ))}
-
-      {finishing && (
-        <p className="text-sm text-zinc-500">
-          Wrapping up and scoring your interview…
-        </p>
-      )}
-
-      {!finishing && busy && (
-        <p className="text-sm text-zinc-500">Interviewer is thinking…</p>
-      )}
-
-      {!finishing && !busy && currentQuestion && (
-        <form
-          onSubmit={handleAnswer}
-          className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm"
-        >
-          <label className="mb-2 block text-sm font-medium">
-            Q{qaLog.length + 1}. {currentQuestion}
-          </label>
-          <textarea
-            rows={5}
-            value={answer}
-            onChange={(e) => setAnswer(e.target.value)}
-            placeholder="Answer as you would in the real interview…"
-            required
-            className="mb-4 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-          />
           <button
-            type="submit"
-            className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white"
+            className="link-btn"
+            onClick={() => router.push('/dashboard')}
           >
-            Submit answer
+            Save &amp; exit
           </button>
-        </form>
-      )}
+        </div>
+
+        <GlowCard tilt={false} className="glass-strong chat-panel">
+          <Transcript items={qaLog} />
+
+          {finishing && (
+            <div className="msg ai">
+              <div className="avatar">AI</div>
+              <div className="bubble typing">
+                Wrapping up and scoring your interview
+                <span className="dots">
+                  <i /> <i /> <i />
+                </span>
+              </div>
+            </div>
+          )}
+
+          {!finishing && busy && (
+            <div className="msg ai">
+              <div className="avatar">AI</div>
+              <div className="bubble typing">
+                Interviewer is thinking
+                <span className="dots">
+                  <i /> <i /> <i />
+                </span>
+              </div>
+            </div>
+          )}
+
+          {!finishing && !busy && currentQuestion && (
+            <div className="msg ai">
+              <div className="avatar">AI</div>
+              <div className="bubble">
+                <span className="q-index">Q{qaLog.length + 1}</span>
+                {currentQuestion}
+              </div>
+            </div>
+          )}
+
+          {error && (
+            <div className="err-row">
+              <p className="err">{error}</p>
+              <button className="btn btn-ghost btn-sm" onClick={retry}>
+                Retry
+              </button>
+            </div>
+          )}
+
+          <div ref={bottomRef} />
+        </GlowCard>
+
+        {!finishing && !busy && currentQuestion && (
+          <form className="answer-bar" onSubmit={handleAnswer}>
+            <textarea
+              className="input"
+              rows={3}
+              value={answer}
+              onChange={(e) => setAnswer(e.target.value)}
+              placeholder="Answer as you would in the real interview…"
+              required
+            />
+            <button className="btn btn-primary" type="submit">
+              Send <span aria-hidden>→</span>
+            </button>
+          </form>
+        )}
+      </div>
     </div>
   );
 }

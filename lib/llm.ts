@@ -1,64 +1,94 @@
-import { QAItem, InterviewStep, FinalReport } from '@/types/interview';
+import {
+  QAItem,
+  InterviewStep,
+  FinalReport,
+  Provider,
+} from '@/types/interview';
 
-const PROVIDER = process.env.LLM_PROVIDER || 'gemini';
+const DEFAULT_PROVIDER: Provider =
+  process.env.LLM_PROVIDER === 'gemini' ? 'gemini' : 'groq';
 
-async function callGemini(
-  systemPrompt: string,
-  userPrompt: string,
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// POST with retry on 429/503 (transient overload), friendly errors otherwise.
+async function postWithRetry(
+  name: string,
+  url: string,
+  init: RequestInit,
+  extract: (data: any) => string | undefined,
 ): Promise<string> {
-  const key = process.env.GEMINI_API_KEY;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${key}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-      contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-      generationConfig: { responseMimeType: 'application/json' },
-    }),
-  });
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text)
-    throw new Error('Gemini returned no content: ' + JSON.stringify(data));
-  return text;
+  let status = 0;
+  let data: any = {};
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const res = await fetch(url, init);
+    status = res.status;
+    data = await res.json().catch(() => ({}));
+    const text = extract(data);
+    if (text) return text;
+    if (status !== 503 && status !== 429) break;
+    await sleep(700 * 2 ** attempt);
+  }
+  if (status === 503 || status === 429) {
+    throw new Error(
+      `${name} is busy right now (${status}). Retry, or switch model in the top bar.`,
+    );
+  }
+  throw new Error(
+    `${name} error (${status}): ${data?.error?.message ?? JSON.stringify(data)}`,
+  );
 }
 
-async function callGroq(
-  systemPrompt: string,
-  userPrompt: string,
-): Promise<string> {
-  const key = process.env.GROQ_API_KEY;
-  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${key}`,
+function callGemini(systemPrompt: string, userPrompt: string) {
+  const key = process.env.GEMINI_API_KEY;
+  return postWithRetry(
+    'Gemini',
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${key}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+        generationConfig: { responseMimeType: 'application/json' },
+      }),
     },
-    body: JSON.stringify({
-      model: 'openai/gpt-oss-120b',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      response_format: { type: 'json_object' },
-    }),
-  });
-  const data = await res.json();
-  const text = data?.choices?.[0]?.message?.content;
-  if (!text)
-    throw new Error('Groq returned no content: ' + JSON.stringify(data));
-  return text;
+    (d) => d?.candidates?.[0]?.content?.parts?.[0]?.text,
+  );
+}
+
+function callGroq(systemPrompt: string, userPrompt: string) {
+  const key = process.env.GROQ_API_KEY;
+  return postWithRetry(
+    'Groq',
+    'https://api.groq.com/openai/v1/chat/completions',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${key}`,
+      },
+      body: JSON.stringify({
+        model: 'openai/gpt-oss-120b',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        response_format: { type: 'json_object' },
+      }),
+    },
+    (d) => d?.choices?.[0]?.message?.content,
+  );
 }
 
 async function callLLM<T>(
+  provider: Provider,
   systemPrompt: string,
   userPrompt: string,
 ): Promise<T> {
   const raw =
-    PROVIDER === 'groq'
-      ? await callGroq(systemPrompt, userPrompt)
-      : await callGemini(systemPrompt, userPrompt);
+    provider === 'gemini'
+      ? await callGemini(systemPrompt, userPrompt)
+      : await callGroq(systemPrompt, userPrompt);
   const cleaned = raw.replace(/```json|```/g, '').trim();
   return JSON.parse(cleaned) as T;
 }
@@ -82,11 +112,16 @@ Respond ONLY with a JSON object, no markdown, no preamble, in this exact shape:
 export async function getNextInterviewStep(params: {
   resumeText: string;
   qaLog: QAItem[];
+  provider?: Provider;
 }): Promise<InterviewStep> {
   const userPrompt = `RESUME:\n${params.resumeText}\n\nQ&A LOG SO FAR (JSON):\n${JSON.stringify(
     params.qaLog,
   )}\n\nGiven the above, return the next step as specified.`;
-  return callLLM<InterviewStep>(INTERVIEWER_SYSTEM_PROMPT, userPrompt);
+  return callLLM<InterviewStep>(
+    params.provider ?? DEFAULT_PROVIDER,
+    INTERVIEWER_SYSTEM_PROMPT,
+    userPrompt,
+  );
 }
 
 const REPORT_SYSTEM_PROMPT = `
@@ -112,9 +147,14 @@ Respond ONLY with a JSON object, no markdown, in this exact shape:
 export async function generateReport(params: {
   resumeText: string;
   qaLog: QAItem[];
+  provider?: Provider;
 }): Promise<FinalReport> {
   const userPrompt = `RESUME:\n${params.resumeText}\n\nFULL TRANSCRIPT (JSON):\n${JSON.stringify(
     params.qaLog,
   )}\n\nGenerate the final report as specified.`;
-  return callLLM<FinalReport>(REPORT_SYSTEM_PROMPT, userPrompt);
+  return callLLM<FinalReport>(
+    params.provider ?? DEFAULT_PROVIDER,
+    REPORT_SYSTEM_PROMPT,
+    userPrompt,
+  );
 }
