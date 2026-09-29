@@ -48,26 +48,6 @@ export default function Navbar() {
             </Link>
           </li>
         )}
-        {!loading && (
-          <li>
-            {user ? (
-              <button
-                className="nav-auth"
-                onClick={async () => {
-                  close();
-                  await signOut(auth);
-                  router.push('/');
-                }}
-              >
-                Log out
-              </button>
-            ) : (
-              <Link href="/login" className={active('/login')} onClick={close}>
-                Log in
-              </Link>
-            )}
-          </li>
-        )}
       </ul>
 
       <div className="nav-right">
@@ -91,6 +71,25 @@ export default function Navbar() {
             Groq
           </button>
         </div>
+
+        {!loading &&
+          (user ? (
+            <button
+              className="nav-auth"
+              onClick={async () => {
+                close();
+                await signOut(auth);
+                router.push('/');
+              }}
+            >
+              Log out
+            </button>
+          ) : (
+            <Link href="/login" className="nav-auth" onClick={close}>
+              Log in
+            </Link>
+          ))}
+
         <button
           className="menu-toggle"
           aria-label="Menu"
