@@ -26,6 +26,9 @@ export default function Interview({
   const [busy, setBusy] = useState(true);
   const [finishing, setFinishing] = useState(false);
   const [error, setError] = useState('');
+  const [retryStage, setRetryStage] = useState<'question' | 'report' | null>(
+    null,
+  );
   const started = useRef(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -58,6 +61,7 @@ export default function Interview({
   async function fetchNextQuestion(resume: string, log: QAItem[]) {
     setBusy(true);
     setError('');
+    setRetryStage(null);
     try {
       const res = await fetch('/api/interview', {
         method: 'POST',
@@ -83,6 +87,7 @@ export default function Interview({
       setCurrentQuestion(step.question);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.');
+      setRetryStage('question');
     } finally {
       setBusy(false);
     }
@@ -90,6 +95,8 @@ export default function Interview({
 
   async function finishInterview(resume: string, log: QAItem[]) {
     setFinishing(true);
+    setError('');
+    setRetryStage(null);
     try {
       const res = await fetch('/api/report', {
         method: 'POST',
@@ -105,6 +112,7 @@ export default function Interview({
       router.push(`/report/${id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.');
+      setRetryStage('report');
       setFinishing(false);
     }
   }
@@ -124,7 +132,9 @@ export default function Interview({
   }
 
   function retry() {
-    if (currentQuestion || finishing) {
+    if (retryStage === 'report') {
+      finishInterview(resumeText, qaLog);
+    } else if (retryStage === 'question') {
       fetchNextQuestion(resumeText, qaLog);
     }
   }
